@@ -170,8 +170,8 @@ export function dashboardHtml(env, url, username, isAdmin, sites) {
       </div>
       <div class="auth-or">或</div>
       <button class="github-btn" onclick="ghLogin()">
-        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-        GitHub 登录
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a7 7 0 00-5.5 11.2L2 17.7V22h4v-2h2v-2h2l2.3-2.3A7 7 0 0012 2zm0 4a2 2 0 110 4 2 2 0 010-4z"/></svg>
+        OAuth 登录
       </button>
       <div class="msg" id="authMsg"></div>
     </div>
@@ -189,7 +189,7 @@ export function dashboardHtml(env, url, username, isAdmin, sites) {
   function authMsg(t,ok){var e=document.getElementById('authMsg');e.className='msg '+(ok?'ok':'err');e.textContent=t;}
   async function doAuth(){var u=document.getElementById('au').value.trim();var p=document.getElementById('ap').value;if(!u||!p)return authMsg('请输入账号和密码',false);try{var r=await fetch('/api/'+(authMode==='login'?'login':'register'),{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({username:u,password:p})});var j=await r.json();if(j.ok){authMsg(authMode==='login'?'登录成功':'注册成功',true);setTimeout(function(){window.location.href=__target;},500);}else authMsg(j.error||'操作失败',false);}catch(e){authMsg('网络错误',false);}}
   function doLogout(){fetch('/api/logout',{method:'POST',credentials:'include'}).then(function(){window.location.href='/';});}
-  function ghLogin(){window.location.href='/api/github/login';}
+  function ghLogin(){var n=(typeof __target!=='undefined'&&__target)?encodeURIComponent(__target):'';var ref=encodeURIComponent(window.location.origin+'/api/oauth/sso'+(n?'?next='+n:''));window.location.href='https://oauth.107211.xyz/?ref='+ref;}
   document.getElementById('ap').addEventListener('keydown',function(e){if(e.key==='Enter')doAuth();});
 </script>
 </body>
@@ -223,15 +223,15 @@ export function loginPageHtml(env, url) {
       </div>
       <div class="auth-or">或</div>
       <button class="github-btn" onclick="ghLogin()">
-        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-        GitHub 登录
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a7 7 0 00-5.5 11.2L2 17.7V22h4v-2h2v-2h2l2.3-2.3A7 7 0 0012 2zm0 4a2 2 0 110 4 2 2 0 010-4z"/></svg>
+        OAuth 登录
       </button>
       <div class="msg" id="authMsg"></div>
     </div>
   </div>
 <script>
   var authMode='login';
-  function ghLogin(){window.location.href='/api/github/login';}
+  function ghLogin(){var n=(typeof __target!=='undefined'&&__target)?encodeURIComponent(__target):'';var ref=encodeURIComponent(window.location.origin+'/api/oauth/sso'+(n?'?next='+n:''));window.location.href='https://oauth.107211.xyz/?ref='+ref;}
   function toggleAuth(){authMode=authMode==='login'?'register':'login';document.getElementById('authAlt').textContent=authMode==='login'?'注册':'登录';document.querySelector('.btn-primary').textContent=authMode==='login'?'登 录':'注 册';}
   function authMsg(t,ok){var e=document.getElementById('authMsg');e.className='msg '+(ok?'ok':'err');e.textContent=t;}
   async function doAuth(){var u=document.getElementById('au').value.trim();var p=document.getElementById('ap').value;if(!u||!p)return authMsg('请输入账号和密码',false);try{var r=await fetch('/api/'+(authMode==='login'?'login':'register'),{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({username:u,password:p})});var j=await r.json();if(j.ok){authMsg(authMode==='login'?'登录成功':'注册成功',true);setTimeout(function(){window.location.href='/';},500);}else authMsg(j.error||'操作失败',false);}catch(e){authMsg('网络错误',false);}}

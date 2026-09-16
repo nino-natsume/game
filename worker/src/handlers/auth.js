@@ -3,7 +3,7 @@ import {
     hashPassword, makeSession, makeCookie, SESSION_TTL_SECONDS, bytesToHex,
 } from "../lib/crypto.js";
 import {
-    findUserByUsername, findUserByGithubId, usernameExists, insertUser, updateNickname,
+    findUserByUsername, findUserByOauthKey, usernameExists, insertUser, updateNickname,
     recordLoginAttempt, countLoginFailures, clearLoginFailures,
 } from "../lib/db.js";
 import { requireUser } from "../lib/session.js";
@@ -163,9 +163,9 @@ export async function login(request, env) {
     }
 
     const row = await findUserByUsername(env.DB, name);
-    if (!row || String(row.pass_hash).startsWith("remote") || String(row.pass_hash).startsWith("github")) {
+    if (!row || /^(remote|github|oauth)/.test(String(row.pass_hash))) {
         await recordLoginAttempt(env.DB, name, ip, false);
-        return jsonError("账号或密码错误(GitHub 账号请用 GitHub 登录)", 401);
+        return jsonError("账号或密码错误(第三方账号请用 OAuth 登录)", 401);
     }
 
     const [, saltHex] = String(row.pass_hash).split("$");
@@ -258,8 +258,8 @@ export async function changePassword(request, env) {
 
     const row = await findUserByUsername(env.DB, username);
     if (!row) return jsonError("账号不存在", 404);
-    if (String(row.pass_hash).startsWith("github")) {
-        return jsonError("GitHub 账号请直接使用 GitHub 登录,无需设置密码", 400);
+    if (/^(github|oauth)/.test(String(row.pass_hash))) {
+        return jsonError("第三方账号请使用 OAuth 登录,无需设置密码", 400);
     }
 
     const [, saltHex] = String(row.pass_hash).split("$");
@@ -276,24 +276,13 @@ export async function changePassword(request, env) {
 }
 
 // ---------------------------------------------------------------------------
-//  GitHub OAuth 登录
+//  OAuth 统一登录(经 oauth.107211.xyz 授权中心回调,建立本地会话)
 // ---------------------------------------------------------------------------
-const GH_STATE_COOKIE = "gh_oauth_state";
-const GH_STATE_MAX_AGE = 600;
-
-function ghStateCookie(value) {
-    return `${GH_STATE_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${GH_STATE_MAX_AGE}`;
-}
-
-function ghStateClear() {
-    return `${GH_STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-}
-
 function failurePage(title, message) {
     return html(`<!DOCTYPE html>
 <html lang="zh-CN">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GitHub 登录 - 失败</title>
+<title>OAuth 登录 - 失败</title>
 <style>body{font-family:-apple-system,'Segoe UI','Noto Sans SC',sans-serif;background:#fcfcfc;color:#1f2937;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;}
 .box{max-width:420px;width:100%;background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:32px;text-align:center;box-shadow:0 10px 15px -3px rgba(0,0,0,.1);}
 h1{font-size:20px;margin:0 0 10px;background:linear-gradient(135deg,#ffb7c5,#ff8fa3);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
@@ -308,92 +297,46 @@ function escapeHtml(str) {
     return String(str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-export async function githubLogin(_request, env, url) {
-    const clientId = env.GITHUB_CLIENT_ID;
-    if (!clientId) {
-        return jsonError("未配置 GitHub OAuth(client id)", 500);
+export async function oauthSso(request, env, url) {
+    const success = url.searchParams.get("oauth_success");
+    const provider = (url.searchParams.get("provider") || "").trim();
+    const name = (url.searchParams.get("name") || "").trim();
+    const email = (url.searchParams.get("email") || "").trim();
+
+    if (success !== "1" || !provider) {
+        return failurePage("OAuth 登录失败", "未获得第三方授权或登录流程已失效,请重新尝试。");
     }
-    const stateBytes = new Uint8Array(16);
-    crypto.getRandomValues(stateBytes);
-    const state = bytesToHex(stateBytes);
-
-    const authorize = new URL("https://github.com/login/oauth/authorize");
-    authorize.searchParams.set("client_id", clientId);
-    authorize.searchParams.set("redirect_uri", url.origin + "/api/github/callback");
-    authorize.searchParams.set("scope", "read:user");
-    authorize.searchParams.set("state", state);
-
-    return new Response(null, {
-        status: 302,
-        headers: {
-            location: authorize.toString(),
-            "set-cookie": ghStateCookie(state),
-        },
-    });
-}
-
-export async function githubCallback(request, env, url) {
-    const code = url.searchParams.get("code");
-    const state = url.searchParams.get("state");
-    const cookie = request.headers.get("cookie") || "";
-    const seg = cookie.split(";").map((s) => s.trim()).find((s) => s.startsWith(GH_STATE_COOKIE + "="));
-    const stored = seg ? seg.slice(GH_STATE_COOKIE.length + 1) : null;
-
-    if (!code || !state || !stored || state !== stored) {
-        return failurePage("GitHub 登录失败", "安全校验未通过,请重新尝试。");
-    }
-    if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) {
-        return failurePage("GitHub 登录失败", "服务端未配置 GitHub OAuth。");
+    if (!/^[a-z0-9_-]{1,32}$/i.test(provider)) {
+        return failurePage("OAuth 登录失败", "登录来源无效。");
     }
 
-    const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({
-            client_id: env.GITHUB_CLIENT_ID,
-            client_secret: env.GITHUB_CLIENT_SECRET,
-            code,
-        }),
-    }).catch(() => null);
-    if (!tokenRes) return failurePage("GitHub 登录失败", "连接 GitHub 失败,请稍后重试。");
-    const tokenData = await tokenRes.json().catch(() => ({}));
-    const accessToken = tokenData.access_token;
-    if (!accessToken) return failurePage("GitHub 登录失败", "获取授权令牌失败,请重新尝试。");
+    const key = (email || name || "").slice(0, 120);
+    if (!key) return failurePage("OAuth 登录失败", "未能识别第三方账号身份。");
+    const oauthKey = `${provider}:${key}`;
 
-    const userRes = await fetch("https://api.github.com/user", {
-        headers: {
-            authorization: "Bearer " + accessToken,
-            accept: "application/json",
-            "user-agent": "game-hub",
-        },
-    }).catch(() => null);
-    if (!userRes || !userRes.ok) return failurePage("GitHub 登录失败", "获取 GitHub 用户信息失败。");
-    const gh = await userRes.json().catch(() => ({}));
-    const ghId = String(gh.id || "");
-    if (!ghId) return failurePage("GitHub 登录失败", "未能识别 GitHub 账号。");
-
-    let user = await findUserByGithubId(env.DB, ghId);
+    let user = await findUserByOauthKey(env.DB, oauthKey);
     let username;
     if (user) {
         username = user.username;
     } else {
-        const ghLogin = String(gh.login || "").toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 32);
-        let base = ghLogin || "gh_" + ghId;
-        if (!/^[a-z0-9_]{3,32}$/.test(base)) base = "gh_" + ghId;
+        const base = String(name || "").toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 32) || "user";
         let candidate = base;
         let i = 1;
-        while (await usernameExists(env.DB, candidate)) candidate = base + "_" + (i++);
+        while (await usernameExists(env.DB, candidate)) candidate = `${base}_${i++}`;
         username = candidate;
-        const nickname = String(gh.name || gh.login || username).slice(0, 24);
-        await insertUser(env.DB, username, "github:", nickname, ghId);
+        await insertUser(env.DB, username, `oauth:${provider}`, String(name || username).slice(0, 24), null, provider, oauthKey);
     }
+
+    // 只允许站内相对路径,避免开放重定向
+    let next = url.searchParams.get("next") || "/";
+    if (!next.startsWith("/") || next.startsWith("//")) next = "/";
 
     const token = await makeSession(username, env.SESSION_SECRET, null);
     return new Response(null, {
         status: 302,
         headers: {
-            location: url.origin + "/",
-            "set-cookie": [ghStateClear(), makeCookie(token, SESSION_TTL_SECONDS)],
+            location: url.origin + next,
+            "set-cookie": makeCookie(token, SESSION_TTL_SECONDS),
         },
     });
 }

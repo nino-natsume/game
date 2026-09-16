@@ -25,8 +25,17 @@ export async function ensureUserColumns(db) {
     if (!has("nickname")) {
         await db.prepare("ALTER TABLE users ADD COLUMN nickname TEXT").run();
     }
+    if (!has("oauth_provider")) {
+        await db.prepare("ALTER TABLE users ADD COLUMN oauth_provider TEXT").run();
+    }
+    if (!has("oauth_key")) {
+        await db.prepare("ALTER TABLE users ADD COLUMN oauth_key TEXT").run();
+    }
     await db.prepare(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_github_id ON users (github_id) WHERE github_id IS NOT NULL"
+    ).run();
+    await db.prepare(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth_key ON users (oauth_key) WHERE oauth_key IS NOT NULL"
     ).run();
 }
 
@@ -70,10 +79,10 @@ export async function findUserByUsername(db, username) {
         .first();
 }
 
-export async function findUserByGithubId(db, githubId) {
+export async function findUserByOauthKey(db, oauthKey) {
     return db
-        .prepare("SELECT username, pass_hash, nickname, github_id, created_at FROM users WHERE github_id = ?")
-        .bind(githubId)
+        .prepare("SELECT username, pass_hash, nickname, oauth_key, created_at FROM users WHERE oauth_key = ?")
+        .bind(oauthKey)
         .first();
 }
 
@@ -85,10 +94,10 @@ export async function usernameExists(db, username) {
     return !!row;
 }
 
-export async function insertUser(db, username, passHash, nickname, githubId) {
+export async function insertUser(db, username, passHash, nickname, githubId, oauthProvider, oauthKey) {
     return db
-        .prepare("INSERT INTO users (username, pass_hash, nickname, github_id, created_at) VALUES (?, ?, ?, ?, ?)")
-        .bind(username, passHash, nickname || null, githubId || null, Date.now())
+        .prepare("INSERT INTO users (username, pass_hash, nickname, github_id, oauth_provider, oauth_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(username, passHash, nickname || null, githubId || null, oauthProvider || null, oauthKey || null, Date.now())
         .run();
 }
 
