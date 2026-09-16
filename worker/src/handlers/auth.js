@@ -300,6 +300,7 @@ function escapeHtml(str) {
 export async function oauthSso(request, env, url) {
     const success = url.searchParams.get("oauth_success");
     const provider = (url.searchParams.get("provider") || "").trim();
+    const usernameParam = (url.searchParams.get("username") || "").trim();
     const name = (url.searchParams.get("name") || "").trim();
     const email = (url.searchParams.get("email") || "").trim();
 
@@ -310,7 +311,7 @@ export async function oauthSso(request, env, url) {
         return failurePage("OAuth 登录失败", "登录来源无效。");
     }
 
-    const key = (email || name || "").slice(0, 120);
+    const key = (email || usernameParam || name || "").slice(0, 120);
     if (!key) return failurePage("OAuth 登录失败", "未能识别第三方账号身份。");
     const oauthKey = `${provider}:${key}`;
 
@@ -319,11 +320,7 @@ export async function oauthSso(request, env, url) {
     if (user) {
         username = user.username;
     } else {
-        const base = String(name || "").toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 32) || "user";
-        let candidate = base;
-        let i = 1;
-        while (await usernameExists(env.DB, candidate)) candidate = `${base}_${i++}`;
-        username = candidate;
+        username = await nextUsername(env.DB, provider, usernameParam || name);
         await insertUser(env.DB, username, `oauth:${provider}`, String(name || username).slice(0, 24), null, provider, oauthKey);
     }
 
@@ -339,4 +336,28 @@ export async function oauthSso(request, env, url) {
             "set-cookie": makeCookie(token, SESSION_TTL_SECONDS),
         },
     });
+}
+
+/* 生成贴近第三方网站用户名的本地用户名:
+ * - 拉丁用户名原样保留(如 GitHub login / GitLab username / Twitter username)
+ * - 纯中文或符号昵称清洗后为空时,用 provider 前缀 + 稳定短哈希,
+ *   避免所有账号都退化成 "user" */
+async function nextUsername(db, provider, raw) {
+    const cleaned = String(raw || "").toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 32);
+    const pname = provider.replace(/[^a-z0-9_]/g, "");
+    let base = cleaned;
+    if (!base) {
+        const digest = await sha256Short(`${pname}:${raw}`);
+        base = `${pname}_${digest}`;
+    }
+    if (!/^[a-z0-9_]{3,32}$/.test(base)) base = `${pname}_${base}`.slice(0, 32);
+    let candidate = base;
+    let i = 1;
+    while (await usernameExists(db, candidate)) candidate = `${base}_${i++}`;
+    return candidate;
+}
+
+async function sha256Short(input) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 10);
 }
